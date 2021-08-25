@@ -3,7 +3,7 @@ kind: CronJob
 metadata:
   name: ecr-vulnerability-scan
 spec:
-  schedule: "@daily"
+  schedule: "CRON_TZ=UTC @daily"
   jobTemplate:
     spec:
       template:

@@ -1,0 +1,4 @@
+# Ignore IDE files
+.idea
+# Don't force the app to rebuild when only the Dockerfile has changed
+Dockerfile

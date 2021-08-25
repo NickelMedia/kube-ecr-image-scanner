@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	cfg := cmd.DefaultConfiguration()
+	cfg := &cmd.Config{}
 	arg.MustParse(cfg)
 	if err := ecrscanner.Run(cfg); err != nil {
 		klog.Errorf("Error running kube-ecr-image-scanner: %v", err)

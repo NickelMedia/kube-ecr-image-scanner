@@ -4,11 +4,14 @@ import (
 	"context"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"regexp"
 	"time"
 )
 
+const ecrRepoPattern = "^public.ecr.aws.*|.*\\.dkr\\.ecr\\."
+
 // GetContainerImages returns a list of container images in Pods currently running on the Kubernetes cluster.
-func GetContainerImages(kubeClient *kubernetes.Clientset, namespaces []string) ([]string, error) {
+func GetContainerImages(kubeClient *kubernetes.Clientset, namespaces []string, includeNonEcrImages bool) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	// Get a list of all unique images running in the selected namespaces
@@ -21,7 +24,11 @@ func GetContainerImages(kubeClient *kubernetes.Clientset, namespaces []string) (
 		for _, pod := range podList.Items {
 			containers := append(pod.Spec.Containers, pod.Spec.InitContainers...)
 			for _, container := range containers {
-				imageUris[container.Image] = struct{}{}
+				if includeNonEcrImages {
+					imageUris[container.Image] = struct{}{}
+				} else if match, _ := regexp.MatchString(ecrRepoPattern, container.Image); match {
+					imageUris[container.Image] = struct{}{}
+				}
 			}
 		}
 	}

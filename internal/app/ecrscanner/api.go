@@ -21,12 +21,12 @@ func Run(cfg *cmd.Config) error {
 		return err
 	}
 
-	imageUris, err := pkg.GetContainerImages(kubeClient, cfg.Namespaces)
+	imageUris, err := pkg.GetContainerImages(kubeClient, cfg.Namespaces, cfg.IncludeNonEcrImages)
 	if err != nil {
 		return err
 	}
 
-	pkg.ScanImages(imageUris, cfg.ScanConcurrency)
+	pkg.ScanImages(imageUris, cfg.ScanConcurrency, cfg.Timeout, cfg.AWSAccountID)
 	// TODO: Parse scan results and generate notification(s)!
 	return nil
 }

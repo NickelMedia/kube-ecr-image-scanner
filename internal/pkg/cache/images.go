@@ -1,4 +1,4 @@
-package pkg
+package cache
 
 import (
 	"context"
@@ -13,13 +13,32 @@ import (
 	"strings"
 )
 
-func copyImageToECR(ctx context.Context, client ecriface.ECRAPI, imageUri, accountId, region string) (*string, error) {
+const cacheRepoLifecyclePolicy = `{
+    "rules": [
+        {
+            "rulePriority": 1,
+            "description": "Expire all images after 1 day",
+            "selection": {
+                "tagStatus": "any",
+                "countType": "sinceImagePushed",
+                "countUnit": "days",
+                "countNumber": 1
+            },
+            "action": {
+                "type": "expire"
+            }
+        }
+    ]
+}`
+
+func CopyImageToECR(ctx context.Context, client ecriface.ECRAPI, imageUri, accountId, region string) (*string, error) {
 	klog.Infof("Pulling image from non-ECR source: %s", imageUri)
 	img, err := crane.Pull(imageUri, crane.WithAuthFromKeychain(authn.DefaultKeychain), crane.WithContext(ctx))
 	if err != nil {
 		klog.Errorf("Unable to pull image from %s: %s", imageUri, err.Error())
 		return nil, err
 	}
+
 	imageParts := strings.Split(strings.Split(imageUri, "/")[strings.Count(imageUri, "/")], ":")
 	imageName, imageTag := imageParts[0], imageParts[1]
 	cacheRepo := fmt.Sprintf("kube-ecr-image-scanner-cache/%s", imageName)
@@ -27,6 +46,7 @@ func copyImageToECR(ctx context.Context, client ecriface.ECRAPI, imageUri, accou
 		klog.Errorf("Unable to create cache repository on AWS ECR: %s", err.Error())
 		return nil, err
 	}
+
 	dst := fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com/%s:%s", accountId, region, cacheRepo, imageTag)
 	klog.Infof("Pushing image to ECR: %s", dst)
 	err = crane.Push(img, dst, crane.WithAuthFromKeychain(authn.DefaultKeychain), crane.WithContext(ctx))
@@ -34,22 +54,33 @@ func copyImageToECR(ctx context.Context, client ecriface.ECRAPI, imageUri, accou
 		klog.Errorf("Unable to push image to %s: %s", dst, err.Error())
 		return nil, err
 	}
+
 	return &dst, nil
 }
 
 
 func createCacheRepository(ctx context.Context, client ecriface.ECRAPI, cacheRepoName string) error {
-	klog.Info("Creating cache repository %s...", cacheRepoName)
+	klog.Infof("Creating cache repository %s...", cacheRepoName)
 	in := &ecr.CreateRepositoryInput{RepositoryName: aws.String(cacheRepoName)}
-	_, err := client.CreateRepositoryWithContext(ctx, in)
+	out, err := client.CreateRepositoryWithContext(ctx, in)
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
 			switch aerr.Code() {
 			case ecr.ErrCodeRepositoryAlreadyExistsException:
-				klog.Info("Cache repository %s already exists", cacheRepoName)
-				return nil
+				klog.Infof("Cache repository %s already exists", cacheRepoName)
+			default:
+				return err
 			}
+		} else {
+			return err
 		}
 	}
+
+	lin := &ecr.PutLifecyclePolicyInput{
+		RepositoryName: out.Repository.RepositoryName,
+		RegistryId: out.Repository.RegistryId,
+		LifecyclePolicyText: aws.String(cacheRepoLifecyclePolicy),
+	}
+	_, err = client.PutLifecyclePolicyWithContext(ctx, lin)
 	return err
 }

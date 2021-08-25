@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 FROM golang:1.16-stretch AS builder
 
 # Configure go modules and build environment
@@ -33,8 +32,8 @@ COPY --from=builder /dist /usr/local/bin
 ENTRYPOINT ["ecrscanner"]
 
 # Add docker credential helpers so we can pull images from remote repositories and push to AWS ECR
-ADD --chmod=0755 https://amazon-ecr-credential-helper-releases.s3.us-east-2.amazonaws.com/0.5.0/linux-amd64/docker-credential-ecr-login /usr/local/bin/
-RUN mkdir /.docker && mkdir /.ecr && chown nobody:nobody /.ecr && echo '{"credsStore":"ecr-login"}' >> /.docker/config.json
+ADD https://amazon-ecr-credential-helper-releases.s3.us-east-2.amazonaws.com/0.5.0/linux-amd64/docker-credential-ecr-login /usr/local/bin/
+RUN chmod 755 /usr/local/bin/docker-credential-ecr-login && mkdir /.docker && mkdir /.ecr && chown nobody:nobody /.ecr && echo '{"credsStore":"ecr-login"}' >> /.docker/config.json
 
 # Set the runtime user:group
 USER nobody:nobody

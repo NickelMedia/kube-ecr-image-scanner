@@ -5,7 +5,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"kube-ecr-image-scanner/cmd"
-	"kube-ecr-image-scanner/internal/pkg"
+	"kube-ecr-image-scanner/internal/pkg/scanner"
 )
 
 func Run(cfg *cmd.Config) error {
@@ -21,12 +21,12 @@ func Run(cfg *cmd.Config) error {
 		return err
 	}
 
-	imageUris, err := pkg.GetContainerImages(kubeClient, cfg.Namespaces, cfg.IncludeNonEcrImages)
+	imageUris, err := scanner.GetContainerImages(kubeClient, cfg.Namespaces, cfg.IncludeNonEcrImages)
 	if err != nil {
 		return err
 	}
 
-	pkg.ScanImages(imageUris, cfg.ScanConcurrency, cfg.Timeout, cfg.AWSAccountID)
+	results := scanner.ScanImages(imageUris, cfg.ScanConcurrency, cfg.Timeout, cfg.AWSAccountID)
 	// TODO: Parse scan results and generate notification(s)!
 	return nil
 }

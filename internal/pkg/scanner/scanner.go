@@ -1,4 +1,4 @@
-package pkg
+package scanner
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/ecr"
 	"github.com/aws/aws-sdk-go/service/ecr/ecriface"
 	"k8s.io/klog/v2"
+	"kube-ecr-image-scanner/internal/pkg/cache"
 	"os"
 	"os/signal"
 	"regexp"
@@ -22,7 +23,7 @@ type scanner struct {
 	ecr         ecriface.ECRAPI
 	ctx         context.Context
 	imageChan   chan string
-	resultsChan chan struct{}
+	resultsChan chan ImageScanResult
 	wg          *sync.WaitGroup
 }
 
@@ -31,10 +32,15 @@ type awsConfig struct {
 	region    string
 }
 
-func ScanImages(imageUris []string, concurrency int, timeout time.Duration, accountId string) {
+type ImageScanResult struct {
+	image    *string
+	findings *ecr.ImageScanFindings
+}
+
+func ScanImages(imageUris []string, concurrency int, timeout time.Duration, accountId string) <-chan ImageScanResult {
 	if len(imageUris) == 0 {
 		klog.Info("No images to scan; nothing to do.")
-		return
+		return nil
 	}
 	klog.Infof("Started %d vulnerability scans at %s", len(imageUris), time.Now().Format(time.RFC1123))
 	// Put all images into a channel to scan them concurrently
@@ -56,7 +62,7 @@ func ScanImages(imageUris []string, concurrency int, timeout time.Duration, acco
 	}()
 
 	// Configure image scanners and results channel
-	results := make(chan struct{}, len(imageUris))
+	results := make(chan ImageScanResult, len(imageUris))
 	s := newScanner(&sync.WaitGroup{}, ctx, images, results, accountId)
 	s.wg.Add(concurrency)
 	for i := 0; i < concurrency; i++ {
@@ -69,21 +75,14 @@ func ScanImages(imageUris []string, concurrency int, timeout time.Duration, acco
 	// Wait for image scans to complete and populate the results channel (or for a termination signal to be received)
 	s.wg.Wait()
 
-	// TODO: Maybe do this in another function/goroutine? (pkg/exporter? Need to handle results channel differently.)
-	// Process all the image scan results
-	close(results)
-	for result := range results {
-		klog.Infof("received result: %v", result)
-		// TODO: Process scan results here!
-	}
-
 	// Ensure cancel() is called to clean up any remaining context resources
 	cancel()
+
 	klog.Infof("All image scans completed.")
-	// TODO: return scan results (or error) here!
+	return results
 }
 
-func newScanner(wg *sync.WaitGroup, ctx context.Context, imageChan chan string, resultsChan chan struct{}, accountId string) *scanner {
+func newScanner(wg *sync.WaitGroup, ctx context.Context, imageChan chan string, resultsChan chan ImageScanResult, accountId string) *scanner {
 	s := session.Must(session.NewSessionWithOptions(session.Options{
 		Config: aws.Config{
 			CredentialsChainVerboseErrors: aws.Bool(true),
@@ -110,7 +109,7 @@ func (s *scanner) processImages() {
 			}
 			scanImageUri := imageUri
 			if isEcrUri, _ := regexp.MatchString(ecrRepoPattern, imageUri); !isEcrUri {
-				dst, err := copyImageToECR(s.ctx, s.ecr, imageUri, s.aws.accountId, s.aws.region)
+				dst, err := cache.CopyImageToECR(s.ctx, s.ecr, imageUri, s.aws.accountId, s.aws.region)
 				if err != nil {
 					klog.Errorf("Error copying image %s to ECR for scanning: %s", imageUri, err.Error())
 					break
@@ -142,7 +141,7 @@ func (s *scanner) scanImage(imageUri, scanImageUri string) bool {
 		if aerr, ok := err.(awserr.Error); ok {
 			switch aerr.Code() {
 			case ecr.ErrCodeLimitExceededException:
-				klog.Info("Retrieving existing AWS ECR image scan results for %s:%s", repoName, imageTag)
+				klog.Infof("Retrieving existing AWS ECR image scan results for %s:%s", repoName, imageTag)
 				return true
 			case ecr.ErrCodeImageNotFoundException:
 				klog.Errorf("Image %s:%s not found", repoName, imageTag)
@@ -156,7 +155,7 @@ func (s *scanner) scanImage(imageUri, scanImageUri string) bool {
 	return true
 }
 
-func (s *scanner) processScanResults(imageUri, scanImageUri string, resultsChan chan struct{}) {
+func (s *scanner) processScanResults(imageUri, scanImageUri string, resultsChan chan ImageScanResult) {
 	klog.Infof("Processing scan results for image: %s", imageUri)
 	imageTag, repoName, registryId := splitECRAddress(scanImageUri)
 	in := &ecr.DescribeImageScanFindingsInput{
@@ -169,12 +168,14 @@ func (s *scanner) processScanResults(imageUri, scanImageUri string, resultsChan 
 	if err := s.ecr.WaitUntilImageScanCompleteWithContext(s.ctx, in); err != nil {
 		klog.Errorf("Error while waiting for image scan to complete: %s", err.Error())
 	}
-	out, _ := s.ecr.DescribeImageScanFindingsWithContext(s.ctx, in)
-	for _, finding := range out.ImageScanFindings.Findings {
-		klog.Infof("Found vulnerability info for image %s: %v", imageUri, finding)
+	out, err := s.ecr.DescribeImageScanFindingsWithContext(s.ctx, in)
+	if err != nil {
+		klog.Errorf("Error describing image scan findings: %s", err.Error())
 	}
-	// TODO: Return findings through the results channel here!
-	resultsChan <- struct{}{}
+	resultsChan <- ImageScanResult{
+		&imageUri,
+		out.ImageScanFindings,
+	}
 }
 
 func splitECRAddress(imageUri string) (*string, *string, *string) {

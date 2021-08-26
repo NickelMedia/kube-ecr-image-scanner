@@ -23,7 +23,7 @@ type scanner struct {
 	ecr         ecriface.ECRAPI
 	ctx         context.Context
 	imageChan   chan string
-	resultsChan chan ImageScanResult
+	resultsChan chan *ImageScanResult
 	wg          *sync.WaitGroup
 }
 
@@ -35,9 +35,11 @@ type awsConfig struct {
 type ImageScanResult struct {
 	image    *string
 	findings *ecr.ImageScanFindings
+	err      error
 }
 
-func ScanImages(imageUris []string, concurrency int, timeout time.Duration, accountId string) <-chan ImageScanResult {
+// ScanImages concurrently scans a list of images for vulnerabilities using AWS ECR.
+func ScanImages(imageUris []string, concurrency int, timeout time.Duration, accountId string) <-chan *ImageScanResult {
 	if len(imageUris) == 0 {
 		klog.Info("No images to scan; nothing to do.")
 		return nil
@@ -62,7 +64,7 @@ func ScanImages(imageUris []string, concurrency int, timeout time.Duration, acco
 	}()
 
 	// Configure image scanners and results channel
-	results := make(chan ImageScanResult, len(imageUris))
+	results := make(chan *ImageScanResult, len(imageUris))
 	s := newScanner(&sync.WaitGroup{}, ctx, images, results, accountId)
 	s.wg.Add(concurrency)
 	for i := 0; i < concurrency; i++ {
@@ -82,13 +84,9 @@ func ScanImages(imageUris []string, concurrency int, timeout time.Duration, acco
 	return results
 }
 
-func newScanner(wg *sync.WaitGroup, ctx context.Context, imageChan chan string, resultsChan chan ImageScanResult, accountId string) *scanner {
-	s := session.Must(session.NewSessionWithOptions(session.Options{
-		Config: aws.Config{
-			CredentialsChainVerboseErrors: aws.Bool(true),
-		},
-		SharedConfigState: session.SharedConfigEnable,
-	}))
+// newScanner returns a new scanner for handling image scan requests.
+func newScanner(wg *sync.WaitGroup, ctx context.Context, imageChan chan string, resultsChan chan *ImageScanResult, accountId string) *scanner {
+	s := session.Must(session.NewSessionWithOptions(session.Options{SharedConfigState: session.SharedConfigEnable}))
 	return &scanner{
 		awsConfig{accountId, *s.Config.Region},
 		ecr.New(s),
@@ -99,26 +97,46 @@ func newScanner(wg *sync.WaitGroup, ctx context.Context, imageChan chan string, 
 	}
 }
 
+// processImages starts vulnerability scans and retrieves the results for all image URIs in the scanner's image URI
+// channel; can safely be called concurrently.
 func (s *scanner) processImages() {
 	defer s.wg.Done()
 	for {
 		select {
+		// Handle images received from the imageChannel
 		case imageUri, ok := <-s.imageChan:
+			// End this worker if the channel is closed and there are no more items in the channel
 			if !ok {
 				return
 			}
+			// Track the original imageUri and scanned imageUri separately in case the image needs to be copied to ECR
 			scanImageUri := imageUri
+
+			// Copy non-ECR images to ECR for scanning
 			if isEcrUri, _ := regexp.MatchString(ecrRepoPattern, imageUri); !isEcrUri {
 				dst, err := cache.CopyImageToECR(s.ctx, s.ecr, imageUri, s.aws.accountId, s.aws.region)
 				if err != nil {
 					klog.Errorf("Error copying image %s to ECR for scanning: %s", imageUri, err.Error())
 					break
 				}
+				// Update the imageUri to scan while keeping the original imageUri
 				scanImageUri = *dst
 			}
-			if s.scanImage(imageUri, scanImageUri) {
-				s.processScanResults(imageUri, scanImageUri, s.resultsChan)
+
+			// Scan the image and process the results
+			var findings *ecr.ImageScanFindings
+			err := s.scanImage(imageUri, scanImageUri)
+			if err == nil {
+				findings, err = s.getScanResults(imageUri, scanImageUri)
 			}
+
+			// Put the scan results (or any errors) and imageUri on a channel for further processing
+			s.resultsChan <- &ImageScanResult{
+				&imageUri,
+				findings,
+				err,
+			}
+		// Handle Context cancellation requests
 		case <-s.ctx.Done():
 			klog.Info("Received cancellation signal, stopping image processing...")
 			return
@@ -126,7 +144,8 @@ func (s *scanner) processImages() {
 	}
 }
 
-func (s *scanner) scanImage(imageUri, scanImageUri string) bool {
+// scanImage starts a vulnerability scan for a given image.
+func (s *scanner) scanImage(imageUri, scanImageUri string) error {
 	klog.Infof("Scanning image: %s", imageUri)
 	imageTag, repoName, registryId := splitECRAddress(scanImageUri)
 	in := &ecr.StartImageScanInput{
@@ -142,21 +161,22 @@ func (s *scanner) scanImage(imageUri, scanImageUri string) bool {
 			switch aerr.Code() {
 			case ecr.ErrCodeLimitExceededException:
 				klog.Infof("Retrieving existing AWS ECR image scan results for %s:%s", repoName, imageTag)
-				return true
+				return nil
 			case ecr.ErrCodeImageNotFoundException:
 				klog.Errorf("Image %s:%s not found", repoName, imageTag)
 			default:
 				klog.Errorf("Error when scanning repository %s:%s: %s", repoName, imageTag, err.Error())
 			}
 		}
-		return false
+		return err
 	}
 	klog.Info("Started AWS ECR image scan on %s:%s: %s", *out.RepositoryName, *out.ImageId.ImageTag, *out.ImageScanStatus.Status)
-	return true
+	return nil
 }
 
-func (s *scanner) processScanResults(imageUri, scanImageUri string, resultsChan chan ImageScanResult) {
-	klog.Infof("Processing scan results for image: %s", imageUri)
+// getScanResults retrieves the latest image scan results for a given image.
+func (s *scanner) getScanResults(imageUri, scanImageUri string) (*ecr.ImageScanFindings, error) {
+	klog.Infof("Waiting for scan results for image: %s", imageUri)
 	imageTag, repoName, registryId := splitECRAddress(scanImageUri)
 	in := &ecr.DescribeImageScanFindingsInput{
 		ImageId: &ecr.ImageIdentifier{
@@ -167,17 +187,17 @@ func (s *scanner) processScanResults(imageUri, scanImageUri string, resultsChan 
 	}
 	if err := s.ecr.WaitUntilImageScanCompleteWithContext(s.ctx, in); err != nil {
 		klog.Errorf("Error while waiting for image scan to complete: %s", err.Error())
+		return nil, err
 	}
 	out, err := s.ecr.DescribeImageScanFindingsWithContext(s.ctx, in)
 	if err != nil {
 		klog.Errorf("Error describing image scan findings: %s", err.Error())
+		return nil, err
 	}
-	resultsChan <- ImageScanResult{
-		&imageUri,
-		out.ImageScanFindings,
-	}
+	return out.ImageScanFindings, nil
 }
 
+// splitECRAddress splits an ECR image URI into <imageName>, <repositoryName>, <registryAccountId> components.
 func splitECRAddress(imageUri string) (*string, *string, *string) {
 	imageUriParts := strings.Split(imageUri, ":")
 	repoParts := strings.SplitN(imageUriParts[0], "/", 2)

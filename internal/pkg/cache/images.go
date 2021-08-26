@@ -31,6 +31,8 @@ const cacheRepoLifecyclePolicy = `{
     ]
 }`
 
+// CopyImageToECR pulls an image from the given imageUri and pushes it to a repository on ECR using a common
+// repository prefix.
 func CopyImageToECR(ctx context.Context, client ecriface.ECRAPI, imageUri, accountId, region string) (*string, error) {
 	klog.Infof("Pulling image from non-ECR source: %s", imageUri)
 	img, err := crane.Pull(imageUri, crane.WithAuthFromKeychain(authn.DefaultKeychain), crane.WithContext(ctx))
@@ -58,7 +60,9 @@ func CopyImageToECR(ctx context.Context, client ecriface.ECRAPI, imageUri, accou
 	return &dst, nil
 }
 
-
+// createCacheRepository creates the ECR repository used to store non-ECR images for scanning.
+// A lifecycle policy is automatically added to the created repository so that images copied for
+// scanning are not stored for longer than 1 day.
 func createCacheRepository(ctx context.Context, client ecriface.ECRAPI, cacheRepoName string) error {
 	klog.Infof("Creating cache repository %s...", cacheRepoName)
 	in := &ecr.CreateRepositoryInput{RepositoryName: aws.String(cacheRepoName)}

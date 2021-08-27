@@ -49,14 +49,14 @@ func Run(cfg *cmd.Config) error {
 	// Scan each container image in the list and build a vulnerability report
 	results := scanner.ScanImages(ctx, imageUris, cfg.Concurrency, *awsAccountId)
 	imageReports := report.Build(ctx, cfg.SeverityThreshold, cfg.Concurrency, results)
-	aggregateReport, err := report.Export(imageReports)
 
-	// TODO: Generate report notification! (slack/email/etc.)
-	if err == nil {
-		klog.Infof("GENERATED REPORT:\n%s", *aggregateReport)
+	// Format the vulnerability reports using the given formatter
+	fmtexp := report.NewExporter(cfg.Format)
+	r, err := fmtexp.Format(imageReports)
+	if err != nil {
+		return err
 	}
-
-	return err
+	return fmtexp.Export(r)
 }
 
 // getKubeClient returns a kubernetes client configured with an in-cluster config, or an external kubeconfig file.

@@ -1,7 +1,6 @@
 package report
 
 import (
-	"bytes"
 	"context"
 	"github.com/aws/aws-sdk-go/service/ecr"
 	"k8s.io/klog/v2"
@@ -10,8 +9,6 @@ import (
 	"sort"
 	"strconv"
 	"sync"
-	"text/template"
-	"time"
 )
 
 const (
@@ -19,58 +16,20 @@ const (
 	keyCvss2Vectors   = "CVSS2_VECTOR"
 	keyPackageName    = "package_name"
 	keyPackageVersion = "package_version"
-	reportTemplate    = `{{ printf "Kubernetes container security updates as of %s\n" .Date }}
-{{ printf "----------------------------------------" }}
-{{- range .Reports }}
-{{ .ImageUri | printf "Image: %s" }}
-{{ printf "Summary:\n" }}
-{{- if index .SeverityCounts "CRITICAL" }}{{      printf "%15s%5d\n" "CRITICAL: "      (index .SeverityCounts "CRITICAL")      }}{{ end }}
-{{- if index .SeverityCounts "HIGH" }}{{          printf "%15s%5d\n" "HIGH: "          (index .SeverityCounts "HIGH")          }}{{ end }}
-{{- if index .SeverityCounts "MEDIUM" }}{{        printf "%15s%5d\n" "MEDIUM: "        (index .SeverityCounts "MEDIUM")        }}{{ end }}
-{{- if index .SeverityCounts "LOW" }}{{           printf "%15s%5d\n" "LOW: "           (index .SeverityCounts "LOW")           }}{{ end }}
-{{- if index .SeverityCounts "INFORMATIONAL" }}{{ printf "%15s%5d\n" "INFORMATIONAL: " (index .SeverityCounts "INFORMATIONAL") }}{{ end }}
-{{- if index .SeverityCounts "UNDEFINED" }}{{     printf "%15s%5d\n" "UNDEFINED: "     (index .SeverityCounts "UNDEFINED")     }}{{ end }}
-{{ printf "Reporting Threshold: %s\n" .SeverityThreshold }}
-{{ printf "Details:\n" }}
-{{- $printedVulns := false -}}
-{{- $severityThreshold := .SeverityThreshold -}}
-{{- range .Vulnerabilities -}}
-{{- if le (severityToRank $severityThreshold) (severityToRank .Severity) -}}
-{{- $printedVulns = true }}
-{{ printf "%s: %s (%s)" .Severity .Name .Uri | printf "%-s" }}
-{{ printf "Package: %s:%s" .PackageName .PackageVersion | printf "%-s\n" }}
-{{- if .Score }}{{ printf "CVSS2 Score: %.1f" .Score | printf "%-s\n" }}{{ end -}}
-{{- if .Vectors }}{{ printf "CVSS2 Vectors: %s" .Vectors | printf "%-s\n"}}{{ end -}}
-{{ .Description | printf "Description: %s" | printf "%-s\n" }}
-{{- end -}}
-{{- end -}}
-{{- if not $printedVulns }}{{ printf "No vulnerabilities at %s or above detected!" .SeverityThreshold | printf "%-s" }}{{ end }}
-{{ printf "----------------------------------------" }}
-{{ end -}}
-`
 )
 
-type ImageReport struct {
-	ImageUri          string
-	Vulnerabilities   []*Vulnerability
-	SeverityCounts    map[string]int64
-	SeverityThreshold string
-}
-
-type Report struct {
-	Date    string
-	Reports []*ImageReport
-}
-
-type Vulnerability struct {
-	PackageName    string
-	PackageVersion string
-	Score          float64
-	Description    string
-	Name           string
-	Severity       string
-	Uri            *url.URL
-	Vectors        string
+func NewExporter(rType string) ExportFormatter {
+	switch rType {
+	case "text":
+		return &TextReport{}
+	case "slack":
+		// TODO: Implement Slack ExportFormatter
+		// return &SlackReport{}
+		fallthrough
+	default:
+		klog.Warningf("Unrecognized format '%s', falling back to text format", rType)
+		return &TextReport{}
+	}
 }
 
 // Build creates a report of all vulnerability scans in the given scans channel.
@@ -83,7 +42,7 @@ func Build(ctx context.Context, threshold string, concurrency int, scans chan *s
 	wg := &sync.WaitGroup{}
 	wg.Add(concurrency)
 	for i := 0; i < concurrency; i++ {
-		go generateImageReport(ctx, wg, threshold ,scans, reportsCh)
+		go generateImageReport(ctx, wg, threshold, scans, reportsCh)
 	}
 	wg.Wait()
 
@@ -101,31 +60,6 @@ func Build(ctx context.Context, threshold string, concurrency int, scans chan *s
 	})
 
 	return reports
-}
-
-// Export creates the aggregate vulnerability report from the individual image vulnerability reports.
-func Export(reports []*ImageReport) (*string, error) {
-	report := &Report{
-		time.Now().Format(time.RFC1123Z),
-		reports,
-	}
-
-	klog.Info("Generating template")
-	tmpl, err := template.New("report").Funcs(template.FuncMap{
-		"severityToRank": func(severity string) int {
-			return severityToRank(severity)
-		},
-	}).Parse(reportTemplate)
-	if err != nil {
-		return nil, err
-	}
-	var buffer bytes.Buffer
-	err = tmpl.Execute(&buffer, report)
-	if err != nil {
-		return nil, err
-	}
-	reportStr := buffer.String()
-	return &reportStr, nil
 }
 
 // generateImageReport generates a vulnerability report for each raw image scan result present in the given

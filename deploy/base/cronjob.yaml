@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ecr-vulnerability-scan
+  namespace: default
+spec:
+  # Run scans at midnight UTC on weekdays
+  schedule: "CRON_TZ=UTC 0 0 * * 1-5"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - args:
+                - --scan-namespaces=${NAMESPACE}
+                - --include-non-ecr-images
+              env:
+                - name: NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+              name: kube-ecr-image-scanner
+              image: 146771500595.dkr.ecr.us-east-1.amazonaws.com/kube-ecr-image-scanner:latest
+              imagePullPolicy: Always
+              resources:
+                requests:
+                  memory: 8Gi
+                limits:
+                  memory: 8Gi
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+              securityContext:
+                readOnlyRootFilesystem: true
+          serviceAccountName: kube-ecr-image-scanner
+          restartPolicy: OnFailure
+          volumes:
+            - emptyDir:
+                medium: Memory
+                sizeLimit: 6Gi
+              name: tmp

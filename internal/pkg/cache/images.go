@@ -66,7 +66,7 @@ func CopyImageToECR(ctx context.Context, client ecriface.ECRAPI, imageUri, accou
 func createCacheRepository(ctx context.Context, client ecriface.ECRAPI, cacheRepoName string) error {
 	klog.Infof("Creating cache repository %s...", cacheRepoName)
 	in := &ecr.CreateRepositoryInput{RepositoryName: aws.String(cacheRepoName)}
-	out, err := client.CreateRepositoryWithContext(ctx, in)
+	_, err := client.CreateRepositoryWithContext(ctx, in)
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
 			switch aerr.Code() {
@@ -81,8 +81,7 @@ func createCacheRepository(ctx context.Context, client ecriface.ECRAPI, cacheRep
 	}
 
 	lin := &ecr.PutLifecyclePolicyInput{
-		RepositoryName: out.Repository.RepositoryName,
-		RegistryId: out.Repository.RegistryId,
+		RepositoryName: aws.String(cacheRepoName),
 		LifecyclePolicyText: aws.String(cacheRepoLifecyclePolicy),
 	}
 	_, err = client.PutLifecyclePolicyWithContext(ctx, lin)

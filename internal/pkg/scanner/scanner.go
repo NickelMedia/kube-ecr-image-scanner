@@ -9,12 +9,9 @@ import (
 	"github.com/aws/aws-sdk-go/service/ecr/ecriface"
 	"k8s.io/klog/v2"
 	"kube-ecr-image-scanner/internal/pkg/cache"
-	"os"
-	"os/signal"
 	"regexp"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -33,13 +30,13 @@ type awsConfig struct {
 }
 
 type ImageScanResult struct {
-	image    *string
-	findings *ecr.ImageScanFindings
-	err      error
+	Image    *string
+	Findings *ecr.ImageScanFindings
+	Err      error
 }
 
 // ScanImages concurrently scans a list of images for vulnerabilities using AWS ECR.
-func ScanImages(imageUris []string, concurrency int, timeout time.Duration, accountId string) <-chan *ImageScanResult {
+func ScanImages(ctx context.Context, imageUris []string, concurrency int, accountId string) chan *ImageScanResult {
 	if len(imageUris) == 0 {
 		klog.Info("No images to scan; nothing to do.")
 		return nil
@@ -50,18 +47,6 @@ func ScanImages(imageUris []string, concurrency int, timeout time.Duration, acco
 	for _, imageUri := range imageUris {
 		images <- imageUri
 	}
-
-	// Configure cancellation context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-
-	// Configure shutdown signal handler
-	signalChannel := make(chan os.Signal, 1)
-	signal.Notify(signalChannel, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-signalChannel
-		klog.Infof("Termination signal received, terminating image scanners...")
-		cancel()
-	}()
 
 	// Configure image scanners and results channel
 	results := make(chan *ImageScanResult, len(imageUris))
@@ -76,9 +61,6 @@ func ScanImages(imageUris []string, concurrency int, timeout time.Duration, acco
 
 	// Wait for image scans to complete and populate the results channel (or for a termination signal to be received)
 	s.wg.Wait()
-
-	// Ensure cancel() is called to clean up any remaining context resources
-	cancel()
 
 	klog.Infof("All image scans completed.")
 	return results
@@ -136,7 +118,7 @@ func (s *scanner) processImages() {
 				findings,
 				err,
 			}
-		// Handle Context cancellation requests
+		// Handle Context cancellation
 		case <-s.ctx.Done():
 			klog.Info("Received cancellation signal, stopping image processing...")
 			return
@@ -160,17 +142,17 @@ func (s *scanner) scanImage(imageUri, scanImageUri string) error {
 		if aerr, ok := err.(awserr.Error); ok {
 			switch aerr.Code() {
 			case ecr.ErrCodeLimitExceededException:
-				klog.Infof("Retrieving existing AWS ECR image scan results for %s:%s", repoName, imageTag)
+				klog.Infof("Retrieving existing AWS ECR image scan results for %s:%s", *repoName, *imageTag)
 				return nil
 			case ecr.ErrCodeImageNotFoundException:
-				klog.Errorf("Image %s:%s not found", repoName, imageTag)
+				klog.Errorf("Image %s:%s not found", *repoName, *imageTag)
 			default:
-				klog.Errorf("Error when scanning repository %s:%s: %s", repoName, imageTag, err.Error())
+				klog.Errorf("Error when scanning repository %s:%s: %s", *repoName, *imageTag, err.Error())
 			}
 		}
 		return err
 	}
-	klog.Info("Started AWS ECR image scan on %s:%s: %s", *out.RepositoryName, *out.ImageId.ImageTag, *out.ImageScanStatus.Status)
+	klog.Infof("Started AWS ECR image scan on %s:%s: %s", *out.RepositoryName, *out.ImageId.ImageTag, *out.ImageScanStatus.Status)
 	return nil
 }
 

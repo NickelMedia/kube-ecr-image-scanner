@@ -19,8 +19,6 @@ const (
 	keyCvss2Vectors   = "CVSS2_VECTOR"
 	keyPackageName    = "package_name"
 	keyPackageVersion = "package_version"
-	// TODO: Implement a severity threshold filter to minimize alert/notification spam from low/informational/undefined vulnerabilities
-	// TODO: Implement a successful scan message to display for images with no vulnerabilities detected (using above threshold)
 	reportTemplate    = `{{ printf "Kubernetes container security updates as of %s\n" .Date }}
 {{ printf "----------------------------------------" }}
 {{- range .Reports }}
@@ -32,22 +30,31 @@ const (
 {{- if index .SeverityCounts "LOW" }}{{           printf "%15s%5d\n" "LOW: "           (index .SeverityCounts "LOW")           }}{{ end }}
 {{- if index .SeverityCounts "INFORMATIONAL" }}{{ printf "%15s%5d\n" "INFORMATIONAL: " (index .SeverityCounts "INFORMATIONAL") }}{{ end }}
 {{- if index .SeverityCounts "UNDEFINED" }}{{     printf "%15s%5d\n" "UNDEFINED: "     (index .SeverityCounts "UNDEFINED")     }}{{ end }}
+{{ printf "Reporting Threshold: %s\n" .SeverityThreshold }}
 {{ printf "Details:\n" }}
-{{- range .Vulnerabilities }}
+{{- $printedVulns := false -}}
+{{- $severityThreshold := .SeverityThreshold -}}
+{{- range .Vulnerabilities -}}
+{{- if le (severityToRank $severityThreshold) (severityToRank .Severity) -}}
+{{- $printedVulns = true }}
 {{ printf "%s: %s (%s)" .Severity .Name .Uri | printf "%-s" }}
 {{ printf "Package: %s:%s" .PackageName .PackageVersion | printf "%-s\n" }}
 {{- if .Score }}{{ printf "CVSS2 Score: %.1f" .Score | printf "%-s\n" }}{{ end -}}
-{{ .Description | printf "Description: %s" | printf "%-s" }}
-{{ end }}
+{{- if .Vectors }}{{ printf "CVSS2 Vectors: %s" .Vectors | printf "%-s\n"}}{{ end -}}
+{{ .Description | printf "Description: %s" | printf "%-s\n" }}
+{{- end -}}
+{{- end -}}
+{{- if not $printedVulns }}{{ printf "No vulnerabilities at %s or above detected!" .SeverityThreshold | printf "%-s" }}{{ end }}
 {{ printf "----------------------------------------" }}
-{{ end }}
+{{ end -}}
 `
 )
 
 type ImageReport struct {
-	ImageUri        string
-	Vulnerabilities []*Vulnerability
-	SeverityCounts  map[string]int64
+	ImageUri          string
+	Vulnerabilities   []*Vulnerability
+	SeverityCounts    map[string]int64
+	SeverityThreshold string
 }
 
 type Report struct {
@@ -58,16 +65,16 @@ type Report struct {
 type Vulnerability struct {
 	PackageName    string
 	PackageVersion string
-	PackageVectors string
 	Score          float64
 	Description    string
 	Name           string
 	Severity       string
 	Uri            *url.URL
+	Vectors        string
 }
 
 // Build creates a report of all vulnerability scans in the given scans channel.
-func Build(ctx context.Context, scans chan *scanner.ImageScanResult, concurrency int) []*ImageReport {
+func Build(ctx context.Context, threshold string, concurrency int, scans chan *scanner.ImageScanResult) []*ImageReport {
 	klog.Info("Building vulnerability report")
 	close(scans)
 
@@ -76,7 +83,7 @@ func Build(ctx context.Context, scans chan *scanner.ImageScanResult, concurrency
 	wg := &sync.WaitGroup{}
 	wg.Add(concurrency)
 	for i := 0; i < concurrency; i++ {
-		go generateImageReport(ctx, wg, scans, reportsCh)
+		go generateImageReport(ctx, wg, threshold ,scans, reportsCh)
 	}
 	wg.Wait()
 
@@ -104,7 +111,11 @@ func Export(reports []*ImageReport) (*string, error) {
 	}
 
 	klog.Info("Generating template")
-	tmpl, err := template.New("report").Parse(reportTemplate)
+	tmpl, err := template.New("report").Funcs(template.FuncMap{
+		"severityToRank": func(severity string) int {
+			return severityToRank(severity)
+		},
+	}).Parse(reportTemplate)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +130,7 @@ func Export(reports []*ImageReport) (*string, error) {
 
 // generateImageReport generates a vulnerability report for each raw image scan result present in the given
 // results channel; can safely be called concurrently.
-func generateImageReport(ctx context.Context, wg *sync.WaitGroup, scans <-chan *scanner.ImageScanResult, reports chan *ImageReport) {
+func generateImageReport(ctx context.Context, wg *sync.WaitGroup, threshold string, scans <-chan *scanner.ImageScanResult, reports chan *ImageReport) {
 	defer wg.Done()
 	for {
 		select {
@@ -133,8 +144,9 @@ func generateImageReport(ctx context.Context, wg *sync.WaitGroup, scans <-chan *
 			// Dereference the pointers in the FindingSeverityCounts map, so they can be printed in the report template
 			// for this image
 			report := &ImageReport{
-				ImageUri:       *scan.Image,
-				SeverityCounts: make(map[string]int64, len(scan.Findings.FindingSeverityCounts)),
+				ImageUri:          *scan.Image,
+				SeverityCounts:    make(map[string]int64, len(scan.Findings.FindingSeverityCounts)),
+				SeverityThreshold: threshold,
 			}
 			for k, v := range scan.Findings.FindingSeverityCounts {
 				report.SeverityCounts[k] = *v
@@ -178,9 +190,9 @@ func parseFindings(finding *ecr.ImageScanFinding) *Vulnerability {
 		Description:    *finding.Description,
 		Name:           *finding.Name,
 		PackageName:    vAttrs[keyPackageName],
-		PackageVectors: vAttrs[keyCvss2Vectors],
 		PackageVersion: vAttrs[keyPackageVersion],
 		Severity:       *finding.Severity,
+		Vectors:        vAttrs[keyCvss2Vectors],
 	}
 	// If a CVSS2_SCORE attribute is set, parse it and set the score on the vulnerability
 	if score, ok := vAttrs[keyCvss2Score]; ok {

@@ -2,6 +2,8 @@ package ecrscanner
 
 import (
 	"context"
+	"github.com/aws/aws-sdk-go/aws/ec2metadata"
+	"github.com/aws/aws-sdk-go/aws/session"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -12,23 +14,19 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 func Run(cfg *cmd.Config) error {
-	// Configure a kubernetes client using an in-cluster config, or an external kubeconfig file.
-	kubeConfig, err := rest.InClusterConfig()
-	if err == rest.ErrNotInCluster {
-		kubeConfig, err = clientcmd.BuildConfigFromFlags("", cfg.KubeConfigPath)
-	}
-	if err != nil {
-		return err
-	}
-	kubeClient, err := kubernetes.NewForConfig(kubeConfig)
+	kubeClient, err := getKubeClient(cfg)
 	if err != nil {
 		return err
 	}
 
-	// TODO: Get the AWS Account ID from an IAM Instance Profile, and fallback to the input value the same way that KubeConfigPath is handled above! (Then --aws-account-id can be optional.)
+	awsAccountId, err := getAwsAccountId(cfg)
+	if err != nil {
+		return err
+	}
 
 	// Create the cancellation context and termination signal handler
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
@@ -49,11 +47,42 @@ func Run(cfg *cmd.Config) error {
 	}
 
 	// Scan each container image in the list and build a vulnerability report
-	results := scanner.ScanImages(ctx, imageUris, cfg.Concurrency, cfg.AWSAccountID)
-	imageReports := report.Build(ctx, results, cfg.Concurrency)
+	results := scanner.ScanImages(ctx, imageUris, cfg.Concurrency, *awsAccountId)
+	imageReports := report.Build(ctx, cfg.SeverityThreshold, cfg.Concurrency, results)
 	aggregateReport, err := report.Export(imageReports)
 
 	// TODO: Generate report notification! (slack/email/etc.)
-	klog.Infof("GENERATED REPORT: %s\n", *aggregateReport)
+	if err == nil {
+		klog.Infof("GENERATED REPORT:\n%s", *aggregateReport)
+	}
+
 	return err
+}
+
+// getKubeClient returns a kubernetes client configured with an in-cluster config, or an external kubeconfig file.
+func getKubeClient(cfg *cmd.Config) (*kubernetes.Clientset, error) {
+	kubeConfig, err := rest.InClusterConfig()
+	if err == rest.ErrNotInCluster {
+		kubeConfig, err = clientcmd.BuildConfigFromFlags("", cfg.KubeConfigPath)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return kubernetes.NewForConfig(kubeConfig)
+}
+
+// getAwsAccountId returns the AWS Account ID from the EC2 Instance Metadata Service, or from the application config.
+func getAwsAccountId(cfg *cmd.Config) (*string, error) {
+	svc := ec2metadata.New(session.Must(session.NewSessionWithOptions(session.Options{SharedConfigState: session.SharedConfigEnable})))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	id, err := svc.GetInstanceIdentityDocumentWithContext(ctx)
+	if err != nil {
+		if cfg.AWSAccountID == "" {
+			klog.Errorf("Unable to query EC2 Instance Metadata Service and config.AWSAccountID was not set")
+			return nil, err
+		}
+		id = ec2metadata.EC2InstanceIdentityDocument{AccountID: cfg.AWSAccountID}
+	}
+	return &id.AccountID, nil
 }

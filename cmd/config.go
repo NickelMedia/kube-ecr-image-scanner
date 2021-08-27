@@ -3,7 +3,7 @@ package cmd
 import "time"
 
 type Config struct {
-	AWSAccountID        string        `arg:"--aws-account-id,env:AWS_ACCOUNT_ID,required"`
+	AWSAccountID        string        `arg:"--aws-account-id,env:AWS_ACCOUNT_ID"`
 	Concurrency         int           `arg:"-c,--concurrency,env:CONCURRENCY" default:"5"`
 	IncludeNonEcrImages bool          `arg:"--include-non-ecr-images,env:INCLUDE_NON_ECR_IMAGES" default:"true"`
 	KubeConfigPath      string        `arg:"--kube-config-path,env:KUBE_CONFIG_PATH"`

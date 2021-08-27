@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const reportTemplate = `{{ printf "Kubernetes container security updates as of %s\n" .Date }}
+const textReportTemplate = `{{ printf "Kubernetes container security updates as of %s\n" .Date }}
 {{ printf "----------------------------------------" }}
 {{- range .Reports }}
 {{ .ImageUri | printf "Image: %s" }}
@@ -60,7 +60,7 @@ func (tr *TextReport) Format(reports []*ImageReport) ([]*string, error) {
 		"severityToRank": func(severity string) int {
 			return severityToRank(severity)
 		},
-	}).Parse(reportTemplate)
+	}).Parse(textReportTemplate)
 	if err != nil {
 		return nil, err
 	}

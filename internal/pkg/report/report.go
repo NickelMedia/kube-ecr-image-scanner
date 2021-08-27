@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/aws/aws-sdk-go/service/ecr"
 	"k8s.io/klog/v2"
+	"kube-ecr-image-scanner/cmd"
 	"kube-ecr-image-scanner/internal/pkg/scanner"
 	"net/url"
 	"sort"
@@ -18,16 +19,14 @@ const (
 	keyPackageVersion = "package_version"
 )
 
-func NewExporter(rType string) ExportFormatter {
-	switch rType {
+func NewExporter(cfg *cmd.ExporterConfig) ExportFormatter {
+	switch cfg.Type {
 	case "text":
 		return &TextReport{}
 	case "slack":
-		// TODO: Implement Slack ExportFormatter
-		// return &SlackReport{}
-		fallthrough
+		return NewSlackReport(&cfg.SlackConfig)
 	default:
-		klog.Warningf("Unrecognized format '%s', falling back to text format", rType)
+		klog.Warningf("Unrecognized format '%s', falling back to text format", cfg.Type)
 		return &TextReport{}
 	}
 }

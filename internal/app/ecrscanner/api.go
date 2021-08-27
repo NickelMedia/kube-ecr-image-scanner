@@ -51,7 +51,7 @@ func Run(cfg *cmd.Config) error {
 	imageReports := report.Build(ctx, cfg.SeverityThreshold, cfg.Concurrency, results)
 
 	// Format the vulnerability reports using the given formatter
-	fmtexp := report.NewExporter(cfg.Format)
+	fmtexp := report.NewExporter(&cfg.ExporterConfig)
 	r, err := fmtexp.Format(imageReports)
 	if err != nil {
 		return err

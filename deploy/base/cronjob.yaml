@@ -9,6 +9,9 @@ spec:
   jobTemplate:
     spec:
       template:
+        metadata:
+          annotations:
+            iam.amazonaws.com/role: k8s-ecr-runtime-scanner
         spec:
           containers:
             - args:
@@ -20,7 +23,7 @@ spec:
                     fieldRef:
                       fieldPath: metadata.namespace
               name: kube-ecr-image-scanner
-              image: 146771500595.dkr.ecr.us-east-1.amazonaws.com/kube-ecr-image-scanner:latest
+              image: public.ecr.aws/t5o6f0a6/kube-ecr-image-scanner:latest
               imagePullPolicy: Always
               resources:
                 requests:
@@ -37,5 +40,4 @@ spec:
           volumes:
             - emptyDir:
                 medium: Memory
-                sizeLimit: 6Gi
               name: tmp

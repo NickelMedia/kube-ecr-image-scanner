@@ -19,7 +19,7 @@ const (
 	keyPackageVersion = "package_version"
 )
 
-func NewExporter(cfg *cmd.ExporterConfig) ExportFormatter {
+func NewExporter(cfg *cmd.ExporterConfig) Exporter {
 	switch cfg.Type {
 	case "text":
 		return &TextReport{}

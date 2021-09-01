@@ -50,13 +50,9 @@ func Run(cfg *cmd.Config) error {
 	results := scanner.ScanImages(ctx, imageUris, cfg.Concurrency, *awsAccountId)
 	imageReports := report.Build(ctx, cfg.SeverityThreshold, cfg.Concurrency, results)
 
-	// Format the vulnerability reports using the given formatter
-	fmtexp := report.NewExporter(&cfg.ExporterConfig)
-	r, err := fmtexp.Format(imageReports)
-	if err != nil {
-		return err
-	}
-	return fmtexp.Export(r)
+	// Export the vulnerability reports using the given exporter
+	exp := report.NewExporter(&cfg.ExporterConfig)
+	return exp.Export(imageReports)
 }
 
 // getKubeClient returns a kubernetes client configured with an in-cluster config, or an external kubeconfig file.

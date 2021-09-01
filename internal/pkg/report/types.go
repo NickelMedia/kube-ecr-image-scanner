@@ -2,9 +2,8 @@ package report
 
 import "net/url"
 
-type ExportFormatter interface {
-	Export(reports []*string) error
-	Format(reports []*ImageReport) ([]*string, error)
+type Exporter interface {
+	Export(reports []*ImageReport) error
 }
 
 type ImageReport struct {

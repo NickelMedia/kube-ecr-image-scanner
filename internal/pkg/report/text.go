@@ -37,19 +37,11 @@ const textReportTemplate = `{{ printf "Kubernetes container security updates as 
 {{ end -}}
 `
 
-// TextReport produces text-based vulnerability reports by implementing the ExportFormatter interface.
+// TextReport produces text-based vulnerability reports by implementing the Exporter interface.
 type TextReport struct{}
 
-// Export simply logs the text-based reports to standard output at the INFO level.
-func (tr *TextReport) Export(reports []*string) error {
-	for _, s := range reports {
-		klog.Infof("GENERATED REPORT:\n%s", *s)
-	}
-	return nil
-}
-
-// Format converts the raw reports to a text-based format, suitable for logging.
-func (tr *TextReport) Format(reports []*ImageReport) ([]*string, error) {
+// Export converts the reports to a text-based format and logs them to standard output at the INFO level.
+func (tr *TextReport) Export(reports []*ImageReport) error {
 	report := &Report{
 		time.Now().Format(time.RFC1123Z),
 		reports,
@@ -62,13 +54,14 @@ func (tr *TextReport) Format(reports []*ImageReport) ([]*string, error) {
 		},
 	}).Parse(textReportTemplate)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	var buffer bytes.Buffer
 	err = tmpl.Execute(&buffer, report)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	reportStr := buffer.String()
-	return []*string{&reportStr}, nil
+	klog.Infof("GENERATED REPORT:\n%s", reportStr)
+	return nil
 }

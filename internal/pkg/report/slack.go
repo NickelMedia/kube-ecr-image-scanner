@@ -10,34 +10,28 @@ import (
 	"time"
 )
 
-const slackReportTemplate = `
+const (
+	reportHeaderTemplate = `
 {{ .ImageUri | printf "Container image security digest: %s" }}
 {{ printf "Summary:\n" }}
-{{- if index .SeverityCounts "CRITICAL" }}{{      printf "%15s%5d\n" "CRITICAL: "      (index .SeverityCounts "CRITICAL")      }}{{ end }}
-{{- if index .SeverityCounts "HIGH" }}{{          printf "%15s%5d\n" "HIGH: "          (index .SeverityCounts "HIGH")          }}{{ end }}
-{{- if index .SeverityCounts "MEDIUM" }}{{        printf "%15s%5d\n" "MEDIUM: "        (index .SeverityCounts "MEDIUM")        }}{{ end }}
-{{- if index .SeverityCounts "LOW" }}{{           printf "%15s%5d\n" "LOW: "           (index .SeverityCounts "LOW")           }}{{ end }}
-{{- if index .SeverityCounts "INFORMATIONAL" }}{{ printf "%15s%5d\n" "INFORMATIONAL: " (index .SeverityCounts "INFORMATIONAL") }}{{ end }}
-{{- if index .SeverityCounts "UNDEFINED" }}{{     printf "%15s%5d\n" "UNDEFINED: "     (index .SeverityCounts "UNDEFINED")     }}{{ end }}
-{{ printf "Reporting Threshold: %s\n" .SeverityThreshold }}
+{{- if index .SeverityCounts "CRITICAL" }}{{      printf "*%-s*: *%d*\n" "CRITICAL"      (index .SeverityCounts "CRITICAL")      }}{{ end }}
+{{- if index .SeverityCounts "HIGH" }}{{          printf "*%-s*: *%d*\n" "HIGH"          (index .SeverityCounts "HIGH")          }}{{ end }}
+{{- if index .SeverityCounts "MEDIUM" }}{{        printf "*%-s*: *%d*\n" "MEDIUM"        (index .SeverityCounts "MEDIUM")        }}{{ end }}
+{{- if index .SeverityCounts "LOW" }}{{           printf "*%-s*: *%d*\n" "LOW"           (index .SeverityCounts "LOW")           }}{{ end }}
+{{- if index .SeverityCounts "INFORMATIONAL" }}{{ printf "*%-s*: *%d*\n" "INFORMATIONAL" (index .SeverityCounts "INFORMATIONAL") }}{{ end }}
+{{- if index .SeverityCounts "UNDEFINED" }}{{     printf "*%-s*: *%d*\n" "UNDEFINED"     (index .SeverityCounts "UNDEFINED")     }}{{ end }}
+{{ printf "Reporting Threshold: *%s*\n" .SeverityThreshold }}
 {{ printf "Details:\n" }}
-{{- $printedVulns := false -}}
-{{- $severityThreshold := .SeverityThreshold -}}
-{{- range .Vulnerabilities -}}
-{{- if le (severityToRank $severityThreshold) (severityToRank .Severity) -}}
-{{- $printedVulns = true }}
-{{ printf "%s: %s (%s)" .Severity .Name .Uri | printf "%-s" }}
-{{ printf "Package: %s:%s" .PackageName .PackageVersion | printf "%-s\n" }}
-{{- if .Score }}{{ printf "CVSS2 Score: %.1f" .Score | printf "%-s\n" }}{{ end -}}
-{{- if .Vectors }}{{ printf "CVSS2 Vectors: %s" .Vectors | printf "%-s\n"}}{{ end -}}
-{{ .Description | printf "Description: %s" | printf "%-s\n" }}
-{{- end -}}
-{{- end -}}
-{{- if not $printedVulns }}{{ printf "No vulnerabilities at %s or above detected!" .SeverityThreshold | printf "%-s" }}{{ end }}
 `
+	reportVulnerabilityTemplate = `{{ printf "*%s*: <%s|%s>" .Severity .Uri .Name | printf "%-s" }}
+{{ printf "*Package*: %s:%s" .PackageName .PackageVersion | printf "%-s\n" }}
+{{- if .Score }}{{ printf "*CVSS2 Score*: %.1f" .Score | printf "%-s\n" }}{{ end -}}
+{{- if .Vectors }}{{ printf "*CVSS2 Vectors*: %s" .Vectors | printf "%-s\n"}}{{ end -}}
+{{ .Description | printf "*Description*: %s" | printf "%-s\n" }}`
+)
 
 // SlackReport generates vulnerability reports suitable for display within a Slack message by implementing
-// the ExportFormatter interface.
+// the Exporter interface.
 type SlackReport struct{
 	client  *slack.Client
 	channel string
@@ -51,17 +45,30 @@ func NewSlackReport(cfg *cmd.SlackConfig) *SlackReport {
 	}
 }
 
-// Export posts vulnerability reports for each image to Slack as a slack.Message composed of slack.Block objects.
-func (sr *SlackReport) Export(reportMsgs []*string) error {
-	headerSection := sr.GenerateTextBlock(fmt.Sprintf("Kubernetes container security updates as of %s\n", time.Now().Format(time.RFC1123Z)))
-	for _, msg := range reportMsgs {
-		reportSection := sr.GenerateTextBlock(*msg)
-		blockParts := []slack.Block{
-			headerSection,
-			reportSection,
-			slack.NewDividerBlock(),
+// Export posts vulnerability reports for each image to Slack as a message composed of slack.Block objects.
+func (sr *SlackReport) Export(reports []*ImageReport) error {
+	if len(reports) > 0 {
+		channelID, timestamp, err := sr.postMessage(slack.MsgOptionBlocks(sr.generateTextBlock(
+			fmt.Sprintf("Kubernetes container security updates as of *%s*", time.Now().Format(time.RFC1123Z)))))
+		if err != nil {
+			return err
 		}
-		channelID, timestamp, err := sr.PostMessage(blockParts...)
+		klog.Infof("Message successfully sent to channel %s at %s", channelID, timestamp)
+	}
+	for _, r := range reports {
+		header, err := sr.buildReportHeader(r)
+		if err != nil {
+			return err
+		}
+		blockParts := []slack.Block{header}
+
+		vulns, err := sr.buildReportVulnerabilities(r)
+		if err != nil {
+			return err
+		}
+		blockParts = append(blockParts, vulns...)
+
+		channelID, timestamp, err := sr.postMessage(slack.MsgOptionBlocks(blockParts...))
 		if err != nil {
 			return err
 		}
@@ -70,52 +77,66 @@ func (sr *SlackReport) Export(reportMsgs []*string) error {
 	return nil
 }
 
-// Format parses each ImageReport into a string suitable for use within a slack.Block.
-func (sr *SlackReport) Format(reports []*ImageReport) ([]*string, error) {
-	klog.Info("Generating slack message template")
-	tmpl, err := template.New("slack").Funcs(template.FuncMap{
+// buildReportHeader constructs the header block for the given image vulnerability report.
+func (sr *SlackReport) buildReportHeader(report *ImageReport) (slack.Block, error) {
+	klog.Infof("Generating report for image %s...", report.ImageUri)
+	tmpl, err := template.New("report header").Funcs(template.FuncMap{
 		"severityToRank": func(severity string) int {
 			return severityToRank(severity)
 		},
-	}).Parse(slackReportTemplate)
-
+	}).Parse(reportHeaderTemplate)
 	if err != nil {
 		return nil, err
 	}
+	var buffer bytes.Buffer
+	if err := tmpl.Execute(&buffer, report); err != nil {
+		return nil, err
+	}
+	msg := buffer.String()
+	blk := sr.generateTextBlock(msg)
+	return blk, err
+}
 
-	reportMsgs := make([]*string, len(reports))
-	for i, r := range reports {
-		reportMsgs[i], err = sr.BuildReportMessage(tmpl, r)
-		if err != nil {
-			return nil, err
+func (sr *SlackReport) buildReportVulnerabilities(report *ImageReport) ([]slack.Block, error) {
+	klog.Infof("Generating report details for image %s...", report.ImageUri)
+	tmpl, err := template.New("report vulnerability").Parse(reportVulnerabilityTemplate)
+	if err != nil {
+		return nil, err
+	}
+	blocks := make([]slack.Block, 0)
+	for _, v := range report.Vulnerabilities {
+		if severityToRank(v.Severity) > severityToRank(report.SeverityThreshold) {
+			var buffer bytes.Buffer
+			if err := tmpl.Execute(&buffer, v); err != nil {
+				return nil, err
+			}
+			blocks = append(blocks, sr.generateTextBlock(buffer.String()))
+			// Ensure at most 50 blocks are present on a single message, including the report header and separator blocks
+			if len(blocks) == 48 {
+				break
+			}
 		}
 	}
-
-	return reportMsgs, nil
+	if len(blocks) == 0 {
+		blocks = append(blocks, sr.generateTextBlock(fmt.Sprintf("No vulnerabilities at %s or above detected!", report.SeverityThreshold)))
+	}
+	blocks = append(blocks, slack.NewDividerBlock())
+	return blocks, nil
 }
 
-// BuildReportMessage constructs the message body for the given image vulnerability report.
-func (sr *SlackReport) BuildReportMessage(tmpl *template.Template, report *ImageReport) (*string, error) {
-	var buffer bytes.Buffer
-	err := tmpl.Execute(&buffer, report)
-	msg := buffer.String()
-	return &msg, err
-}
-
-// GenerateTextBlock returns a slack SectionBlock for the given input string.
-func (sr *SlackReport) GenerateTextBlock(input string) slack.Block {
+// generateTextBlock returns a slack SectionBlock for the given input string.
+func (sr *SlackReport) generateTextBlock(input string) slack.Block {
+	// Ensure block text is within Slack api limits
+	if len(input) > 3000 {
+		input = input[:2985] + "...\n<TRUNCATED>"
+	}
 	b := slack.NewTextBlockObject("mrkdwn", input, false, false)
 	return slack.NewSectionBlock(b, nil, nil)
 }
 
-// BlockMessage returns a single slack.Message for multiple slack.Block inputs.
-func (sr *SlackReport) BlockMessage(blocks ...slack.Block) slack.Message {
-	return slack.NewBlockMessage(blocks...)
-}
-
-// PostMessage sends the given slack.Block messages to the Slack channel configured for this report.
-func (sr *SlackReport) PostMessage(blocks ...slack.Block) (string, string, error) {
-	// Delay calls to client.PostMessage in order to avoid exceeding Slack's rate limit
+// postMessage sends the given slack.MsgOption messages to the Slack channel configured for this report.
+func (sr *SlackReport) postMessage(options ...slack.MsgOption) (string, string, error) {
+	// Delay calls to client.postMessage in order to avoid exceeding Slack's rate limit
 	time.Sleep(1 * time.Second)
-	return sr.client.PostMessage(sr.channel, slack.MsgOptionBlocks(blocks...))
+	return sr.client.PostMessage(sr.channel, options...)
 }

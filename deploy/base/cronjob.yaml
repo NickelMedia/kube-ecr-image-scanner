@@ -5,7 +5,10 @@ metadata:
   namespace: default
 spec:
   # Run scans at midnight UTC on weekdays
-  schedule: "CRON_TZ=UTC 0 0 * * 1-5"
+  # TODO: Include CRON_TZ=UTC when on K8s 1.22+
+  # schedule: "CRON_TZ=UTC 0 0 * * 1-5"
+  # Run scans at midnight (in kube-controller-manager's timezone) on weekdays
+  schedule: "0 0 * * 1-5"
   jobTemplate:
     spec:
       template:

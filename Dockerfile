@@ -17,8 +17,7 @@ COPY . .
 
 # Build the application(s)
 RUN find /build/cmd -maxdepth 1 -mindepth 1 -type d -printf '%f\n' |\
-    xargs -I{} /bin/bash -c "LDFLAGS=\"-X 'main.appName={}' -X 'main.version=`git tag --sort=-version:refname | head -n 1`'\" \
-    GODEBUG=netdns=go go build -o {} cmd/{}/main.go"
+    xargs -I{} go build -ldflags "-X 'main.appName={}' -X 'main.version=`git tag --sort=-version:refname | head -n 1`'" -o {} cmd/{}/main.go
 
 # Create a /dist folder containing just the files necessary for runtime.
 # It will be copied as the root (/) of the output image.

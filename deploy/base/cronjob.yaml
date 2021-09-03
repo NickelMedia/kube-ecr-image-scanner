@@ -18,12 +18,11 @@ spec:
         spec:
           containers:
             - args:
-                - --namespaces=$(NAMESPACE)
                 - --include-non-ecr-images
               env:
                 - name: AWS_DEFAULT_REGION
                   value: us-east-1
-                - name: NAMESPACE
+                - name: NAMESPACES
                   valueFrom:
                     fieldRef:
                       fieldPath: metadata.namespace

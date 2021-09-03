@@ -2,6 +2,7 @@ package report
 
 import (
 	"context"
+	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ecr"
 	"k8s.io/klog/v2"
 	"kube-ecr-image-scanner/cmd"
@@ -117,6 +118,10 @@ func parseFindings(finding *ecr.ImageScanFinding) *Vulnerability {
 	vAttrs := make(map[string]string, len(finding.Attributes))
 	for _, a := range finding.Attributes {
 		vAttrs[*a.Key] = *a.Value
+	}
+	// Some findings don't have descriptions
+	if finding.Description == nil {
+		finding.Description = aws.String("")
 	}
 	// Extract basic vulnerability info
 	vuln := &Vulnerability{

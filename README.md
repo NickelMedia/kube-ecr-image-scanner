@@ -28,16 +28,17 @@ kubectl apply -k https://github.com/NickelMedia/kube-ecr-image-scanner.git/deplo
 ```
 Alternatively, users can modify the deployment namespace using an overlay:
 ```
-$ mkdir base
-$ cat <<EOF > base/kustomization.yaml
+mkdir base && {
+cat <<EOF > base/kustomization.yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: dev
 resources:
 - https://github.com/NickelMedia/kube-ecr-image-scanner.git/deploy/base
 EOF
-$ kubectl apply -k base
-$ rm -rf base
+} && \
+kubectl apply -k base && \
+rm -rf base
 ```
 
 ### Flags

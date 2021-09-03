@@ -93,6 +93,16 @@ ECR for scanning but can be restricted to a single repository prefix, as shown i
             "Resource": "*"
         },
         {
+            "Sid": "AllowImagePull",
+            "Effect": "Allow",
+            "Action": [
+                "sts:GetServiceBearerToken",
+                "ecr:GetAuthorizationToken",
+                "ecr-public:GetAuthorizationToken"
+            ],
+            "Resource": "*"
+        },
+        {
             "Sid": "AllowExternalImageCache",
             "Effect": "Allow",
             "Action": [
@@ -103,7 +113,6 @@ ECR for scanning but can be restricted to a single repository prefix, as shown i
                 "ecr:InitiateLayerUpload",
                 "ecr:GetRepositoryPolicy",
                 "ecr:GetDownloadUrlForLayer",
-                "ecr:GetAuthorizationToken",
                 "ecr:DescribeImages",
                 "ecr:CreateRepository",
                 "ecr:CompleteLayerUpload",

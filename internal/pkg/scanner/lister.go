@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const ecrRepoPattern = "^public.ecr.aws.*|.*\\.dkr\\.ecr\\."
+const ecrRepoPattern = ".*\\.dkr\\.ecr\\."
 
 // GetContainerImages returns a list of container images in Pods currently running on the Kubernetes cluster.
 func GetContainerImages(kubeClient *kubernetes.Clientset, namespaces []string, includeNonEcrImages bool) ([]string, error) {

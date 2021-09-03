@@ -4,11 +4,11 @@ metadata:
   name: ecr-vulnerability-scan
   namespace: default
 spec:
-  # Run scans at midnight UTC on weekdays
+  # Run scans at 10:00AM UTC on weekdays
   # TODO: Include CRON_TZ=UTC when on K8s 1.22+
-  # schedule: "CRON_TZ=UTC 0 0 * * 1-5"
-  # Run scans at midnight (in kube-controller-manager's timezone) on weekdays
-  schedule: "0 0 * * 1-5"
+  # schedule: "CRON_TZ=UTC 0 10 * * 1-5"
+  # Run scans at 10:00AM (in kube-controller-manager's timezone) on weekdays
+  schedule: "0 10 * * 1-5"
   jobTemplate:
     spec:
       template:
@@ -18,9 +18,11 @@ spec:
         spec:
           containers:
             - args:
-                - --scan-namespaces=${NAMESPACE}
+                - --namespaces=$(NAMESPACE)
                 - --include-non-ecr-images
               env:
+                - name: AWS_DEFAULT_REGION
+                  value: us-east-1
                 - name: NAMESPACE
                   valueFrom:
                     fieldRef:

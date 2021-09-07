@@ -105,7 +105,7 @@ func (sr *SlackReport) buildReportVulnerabilities(report *ImageReport) ([]slack.
 	}
 	blocks := make([]slack.Block, 0)
 	for _, v := range report.Vulnerabilities {
-		if severityToRank(v.Severity) > severityToRank(report.SeverityThreshold) {
+		if severityToRank(v.Severity) >= severityToRank(report.SeverityThreshold) {
 			var buffer bytes.Buffer
 			if err := tmpl.Execute(&buffer, v); err != nil {
 				return nil, err

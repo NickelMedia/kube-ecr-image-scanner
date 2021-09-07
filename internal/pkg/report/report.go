@@ -75,19 +75,19 @@ func generateImageReport(ctx context.Context, wg *sync.WaitGroup, threshold stri
 				return
 			}
 
-			// Dereference the pointers in the FindingSeverityCounts map, so they can be printed in the report template
-			// for this image
 			report := &ImageReport{
 				ImageUri:          *scan.Image,
-				SeverityCounts:    make(map[string]int64, len(scan.Findings.FindingSeverityCounts)),
 				SeverityThreshold: threshold,
 			}
-			for k, v := range scan.Findings.FindingSeverityCounts {
-				report.SeverityCounts[k] = *v
-			}
-
-			// Parse the image scan findings into a printable format
 			if scan.Findings != nil {
+				// Dereference the pointers in the FindingSeverityCounts map, so they can be printed in the report
+				// template for this image
+				report.SeverityCounts = make(map[string]int64, len(scan.Findings.FindingSeverityCounts))
+				for k, v := range scan.Findings.FindingSeverityCounts {
+					report.SeverityCounts[k] = *v
+				}
+
+				// Parse the image scan findings into a printable format
 				for _, v := range scan.Findings.Findings {
 					vuln := parseFindings(v)
 					report.Vulnerabilities = append(report.Vulnerabilities, vuln)

@@ -42,7 +42,12 @@ func CopyImageToECR(ctx context.Context, client ecriface.ECRAPI, imageUri, accou
 	}
 
 	imageParts := strings.Split(strings.Split(imageUri, "/")[strings.Count(imageUri, "/")], ":")
-	imageName, imageTag := imageParts[0], imageParts[1]
+	var imageName, imageTag string
+	if len(imageParts) > 1 {
+		imageName, imageTag = imageParts[0], imageParts[1]
+	} else {
+		imageName, imageTag = imageParts[0], "latest"
+	}
 	cacheRepo := fmt.Sprintf("kube-ecr-image-scanner-cache/%s", imageName)
 	if err := createCacheRepository(ctx, client, cacheRepo); err != nil {
 		klog.Errorf("Unable to create cache repository on AWS ECR: %s", err.Error())

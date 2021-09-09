@@ -1,7 +1,9 @@
 package cache
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -9,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/ecr/ecriface"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/crane"
+	"github.com/google/go-containerregistry/pkg/v1"
 	"k8s.io/klog/v2"
 	"strings"
 )
@@ -41,7 +44,12 @@ func CopyImageToECR(ctx context.Context, client ecriface.ECRAPI, imageUri, accou
 		return nil, err
 	}
 
-	imageParts := strings.Split(strings.Split(imageUri, "/")[strings.Count(imageUri, "/")], ":")
+	var imageParts []string
+	if strings.Contains(imageUri, "@") {
+		imageParts = strings.Split(strings.Split(imageUri, "/")[strings.Count(imageUri, "/")], "@")
+	} else {
+		imageParts = strings.Split(strings.Split(imageUri, "/")[strings.Count(imageUri, "/")], ":")
+	}
 	var imageName, imageTag string
 	if len(imageParts) > 1 {
 		imageName, imageTag = imageParts[0], imageParts[1]
@@ -54,7 +62,12 @@ func CopyImageToECR(ctx context.Context, client ecriface.ECRAPI, imageUri, accou
 		return nil, err
 	}
 
-	dst := fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com/%s:%s", accountId, region, cacheRepo, imageTag)
+	var dst string
+	if strings.Contains(imageUri, "@") {
+		dst = fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com/%s@%s", accountId, region, cacheRepo, imageTag)
+	} else {
+		dst = fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com/%s:%s", accountId, region, cacheRepo, imageTag)
+	}
 	klog.Infof("Pushing image to ECR: %s", dst)
 	err = crane.Push(img, dst, crane.WithAuthFromKeychain(authn.DefaultKeychain), crane.WithContext(ctx))
 	if err != nil {
@@ -91,4 +104,20 @@ func createCacheRepository(ctx context.Context, client ecriface.ECRAPI, cacheRep
 	}
 	_, err = client.PutLifecyclePolicyWithContext(ctx, lin)
 	return err
+}
+
+// DetectMultiArchImage returns the v1.IndexManifest if the given imageUri can be parsed as such.
+func DetectMultiArchImage(imageUri string) (*v1.IndexManifest, error) {
+	mb, err := crane.Manifest(imageUri)
+	if err != nil {
+		return nil, err
+	}
+	im, err := v1.ParseIndexManifest(bytes.NewReader(mb))
+	if  err != nil {
+		return nil, err
+	}
+	if !im.MediaType.IsIndex() {
+		return nil, errors.New(fmt.Sprintf("image %s is not a multi-arch image", imageUri))
+	}
+	return im, nil
 }

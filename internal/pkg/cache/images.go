@@ -116,8 +116,8 @@ func DetectMultiArchImage(imageUri string) (*v1.IndexManifest, error) {
 	if  err != nil {
 		return nil, err
 	}
-	if !im.MediaType.IsIndex() {
-		return nil, errors.New(fmt.Sprintf("image %s is not a multi-arch image", imageUri))
+	if !im.MediaType.IsIndex() && im.MediaType != "" {
+		return nil, errors.New(fmt.Sprintf("image %s is not a multi-arch image (detected %s)", imageUri, im.MediaType))
 	}
 	return im, nil
 }

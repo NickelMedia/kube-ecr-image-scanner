@@ -78,6 +78,7 @@ func generateImageReport(ctx context.Context, wg *sync.WaitGroup, threshold stri
 			report := &ImageReport{
 				ImageUri:          *scan.Image,
 				SeverityThreshold: threshold,
+				Err:               scan.Err,
 			}
 			if scan.Findings != nil {
 				// Dereference the pointers in the FindingSeverityCounts map, so they can be printed in the report

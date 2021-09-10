@@ -11,6 +11,7 @@ type ImageReport struct {
 	Vulnerabilities   []*Vulnerability
 	SeverityCounts    map[string]int64
 	SeverityThreshold string
+	Err               error
 }
 
 type Report struct {

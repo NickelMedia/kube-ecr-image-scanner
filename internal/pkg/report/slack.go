@@ -13,6 +13,7 @@ import (
 const (
 	reportHeaderTemplate = `
 {{ .ImageUri | printf "Container image security digest: %s" }}
+{{ if eq .Err nil -}}
 {{ printf "Summary:\n" }}
 {{- if index .SeverityCounts "CRITICAL" }}{{      printf "*%-s*: *%d*\n" "CRITICAL"      (index .SeverityCounts "CRITICAL")      }}{{ end }}
 {{- if index .SeverityCounts "HIGH" }}{{          printf "*%-s*: *%d*\n" "HIGH"          (index .SeverityCounts "HIGH")          }}{{ end }}
@@ -22,6 +23,9 @@ const (
 {{- if index .SeverityCounts "UNDEFINED" }}{{     printf "*%-s*: *%d*\n" "UNDEFINED"     (index .SeverityCounts "UNDEFINED")     }}{{ end }}
 {{ printf "Reporting Threshold: *%s*\n" .SeverityThreshold }}
 {{ printf "Details:\n" }}
+{{ else -}}
+{{ printf "*Error*: %s" .Err }}
+{{ end }}
 `
 	reportVulnerabilityTemplate = `{{ printf "*%s*: <%s|%s>" .Severity .Uri .Name | printf "%-s" }}
 {{ printf "*Package*: %s:%s" .PackageName .PackageVersion | printf "%-s\n" }}

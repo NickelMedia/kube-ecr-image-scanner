@@ -11,6 +11,7 @@ const textReportTemplate = `{{ printf "Kubernetes container security updates as 
 {{ printf "----------------------------------------" }}
 {{- range .Reports }}
 {{ .ImageUri | printf "Image: %s" }}
+{{ if eq .Err nil -}}
 {{ printf "Summary:\n" }}
 {{- if index .SeverityCounts "CRITICAL" }}{{      printf "%15s%5d\n" "CRITICAL: "      (index .SeverityCounts "CRITICAL")      }}{{ end }}
 {{- if index .SeverityCounts "HIGH" }}{{          printf "%15s%5d\n" "HIGH: "          (index .SeverityCounts "HIGH")          }}{{ end }}
@@ -33,6 +34,9 @@ const textReportTemplate = `{{ printf "Kubernetes container security updates as 
 {{- end -}}
 {{- end -}}
 {{- if not $printedVulns }}{{ printf "No vulnerabilities at %s or above detected!" .SeverityThreshold | printf "%-s" }}{{ end }}
+{{ else -}}
+{{ printf "Error: %s" .Err }}
+{{ end -}}
 {{ printf "----------------------------------------" }}
 {{ end -}}
 `

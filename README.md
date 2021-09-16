@@ -55,7 +55,7 @@ Options:
   --kube-config-path KUBE-CONFIG-PATH
                          Path to a kubeconfig file used to access the cluster. Required if not running on Kubernetes. [env: KUBE_CONFIG_PATH]
   --namespaces NAMESPACES
-                         Comma-separated list of namespaces to scan. [env: NAMESPACES]
+                         List of namespaces to scan. [env: NAMESPACES]
   --severity-threshold SEVERITY-THRESHOLD, -s SEVERITY-THRESHOLD
                          The severity that will trigger a vunerability report. [default: HIGH, env: SEVERITY_THRESHOLD]
   --timeout TIMEOUT      The maximum duration of the scan. [default: 30m, env: TIMEOUT]

@@ -7,7 +7,7 @@ type Config struct {
 	Concurrency         int           `arg:"-c,--concurrency,env:CONCURRENCY" default:"5" help:"Number of concurrent images to download/scan."`
 	IncludeNonEcrImages bool          `arg:"--include-non-ecr-images,env:INCLUDE_NON_ECR_IMAGES" default:"true" help:"Whether non-ECR images should be uploaded to ECR for scanning."`
 	KubeConfigPath      string        `arg:"--kube-config-path,env:KUBE_CONFIG_PATH" help:"Path to a kubeconfig file used to access the cluster. Required if running outside of Kubernetes."`
-	Namespaces          []string      `arg:"env" help:"Comma-separated list of namespaces to scan."`
+	Namespaces          []string      `arg:"env" help:"List of namespaces to scan."`
 	SeverityThreshold   string        `arg:"-s,--severity-threshold,env:SEVERITY_THRESHOLD" default:"HIGH" help:"The severity that will trigger a vunerability report. One of (INFORMATIONAL, LOW, MEDIUM, HIGH, CRITICAL)"`
 	Timeout             time.Duration `arg:"env" default:"30m" help:"The maximum duration of the scan."`
 	ExporterConfig

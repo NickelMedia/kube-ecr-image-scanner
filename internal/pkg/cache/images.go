@@ -12,6 +12,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/crane"
 	"github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/types"
 	"k8s.io/klog/v2"
 	"strings"
 )
@@ -108,16 +109,21 @@ func createCacheRepository(ctx context.Context, client ecriface.ECRAPI, cacheRep
 
 // DetectMultiArchImage returns the v1.IndexManifest if the given imageUri can be parsed as such.
 func DetectMultiArchImage(imageUri string) (*v1.IndexManifest, error) {
-	mb, err := crane.Manifest(imageUri)
+	d, err := crane.Head(imageUri)
 	if err != nil {
 		return nil, err
 	}
-	im, err := v1.ParseIndexManifest(bytes.NewReader(mb))
-	if  err != nil {
-		return nil, err
+	switch d.MediaType {
+	case types.OCIImageIndex, types.DockerManifestList:
+		mb, err := crane.Manifest(imageUri)
+		if err != nil {
+			return nil, err
+		}
+		im, err := v1.ParseIndexManifest(bytes.NewReader(mb))
+		if  err != nil {
+			return nil, err
+		}
+		return im, nil
 	}
-	if !im.MediaType.IsIndex() && im.MediaType != "" {
-		return nil, errors.New(fmt.Sprintf("image %s is not a multi-arch image (detected %s)", imageUri, im.MediaType))
-	}
-	return im, nil
+	return nil, errors.New(fmt.Sprintf("image %s is not a multi-arch image (detected %s)", imageUri, d.MediaType))
 }
